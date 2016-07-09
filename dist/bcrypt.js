@@ -610,7 +610,7 @@
         utfx.calculateUTF8 = function(src) {
             var cp, l=0;
             while ((cp = src()) !== null)
-                l += utfx.calculateCodePoint(cp);
+                l += (cp < 0x80) ? 1 : (cp < 0x800) ? 2 : (cp < 0x10000) ? 3 : 4;
             return l;
         };
 
@@ -623,7 +623,7 @@
         utfx.calculateUTF16asUTF8 = function(src) {
             var n=0, l=0;
             utfx.UTF16toUTF8(src, function(cp) {
-                ++n; l += utfx.calculateCodePoint(cp);
+                ++n; l += (cp < 0x80) ? 1 : (cp < 0x800) ? 2 : (cp < 0x10000) ? 3 : 4;
             });
             return [n,l];
         };
@@ -1219,6 +1219,61 @@
      * @expose
      */
     bcrypt.decodeBase64 = base64_decode;
+
+    /**
+     * Names of async bcrypt methods
+     * @type {Array.<string>}
+     * @inner
+     */
+    var asyncMethodNames = [
+      'hash',
+      'genSalt',
+      'compare'
+    ];
+
+    asyncMethodNames.forEach(function(methodName) {
+      bcrypt[methodName] = makePromisePolyfill(bcrypt[methodName]);
+    });
+
+    /**
+     * Curries original method
+     * Returns a promise if last argument passed to the curried function is a function
+     * Calls a callback-style function if last argument passed to the curried function is not a function
+     * @function
+     * @param {function(data1,data2,callback,?progressCallback)} async bcrypt method
+     * @returns {?Promise}
+     * @inner
+     */
+    function makePromisePolyfill(method) {
+      return function() {
+        var args = Array.prototype.slice.call(arguments);
+        var isPromise = typeof args[args.length] !== 'function';
+
+        if (isPromise) return makePromise(method, args);
+        else           return method.apply(bcrypt, args);
+      }
+    }
+
+    /**
+     * Wraps callback-style function in a promise
+     * @function
+     * @param {function(data1,data2,callback,?progressCallback)} callee method
+     * @param {!Array.<(string|number|function)=>} array of callee method's arguments
+     * @returns {Promise}
+     * @inner
+     */
+    function makePromise(method, args) {
+      return new Promise(function(resolve, reject) {
+        function callback(err, res) {
+          if (err) return reject(err);
+
+          resolve(res);
+        }
+
+        args.push(callback);
+        method.apply(bcrypt, args);
+      });
+    }
 
     return bcrypt;
 }));
